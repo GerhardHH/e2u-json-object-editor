@@ -1,0 +1,217 @@
+<!--
+Defines behaviors usable for Energy2Use (namespace e2uBehaviors).
+
+Especially, holds methods to create GUI elements for the array
+elements and helpers to handle the JSON schema.
+
+   
+
+-->
+
+<script>
+   // initialize behavior namespace if it not yet exists
+   window.E2uBehaviors = window.E2uBehaviors || {};
+   //console.log('Init behavior E2uBehaviors');
+   /**
+    * This behavior holds all code to read a JSON schema.
+    */
+   /** @polymerBehavior E2uBehaviors.JSONSchema */
+   E2uBehaviors.JSONSchema = {
+      created: function() {
+         //console.log("Behavior created");
+      },
+      registered: function() {
+         //console.log("Behavior registered");
+      },
+      getArrayKey: function getArrayKey(myArray, myIndex) {
+         var collection = Polymer.Collection.get(myArray);
+         var keyIndexHash = collection.getKey(myArray[myIndex]);
+         return keyIndexHash;
+      },
+      getArrayIndex: function getArrayIndex(myArray, myKey) {
+         var collection = Polymer.Collection.get(myArray);
+         var item = collection.getItem(myKey);
+         var index = myArray.indexOf(item);
+         return index;
+      },
+      /**
+       * Create an element to be inserted into the generated form.
+       * @parameter schemaProperty
+       * An object describing how to create the element. It must have the following properties:
+       * - property - a property name (path) representing the current property in an underlying object
+       *   For arrays, we have the value of the $arrKey property in the array elements.
+       * - schema - the JSON schema describing the value to be created
+       * - component - describe the component to be used, with name=component name and
+       *   valueProperty=property to set the value on the element
+       */
+      _createElement: function createElement(schemaProperty) {
+         var ctx = this;
+         var pName = schemaProperty.property;
+         var cName = schemaProperty.component.name;
+         var schema = schemaProperty.schema;
+         //var eleProps =
+         var el = ctx.create(cName, {
+            label: schemaProperty.label
+         });
+         if (cName == 'e2u-json-object-editor') {
+            // if we have an object, add the schema information.
+            el.schema = schema;
+            el.schemaProperty = schemaProperty;
+            el._level += 1;
+            el.setAttribute('style', 'margin-left:' + el._level * 10 + 'px');
+            el.addEventListener('value-changed', ctx._objectUp('value.' + pName, el));
+         } else if (cName == 'e2u-json-array-editor') {
+            // if we have an array, add the schema information.
+            el.schema = schema;
+            el.schemaProperty = schemaProperty;
+            el._level += 1;
+            el.setAttribute('style', 'margin-left:' + el._level * 10 + 'px');
+            el.addEventListener('value-changed', ctx._objectUp('value.' + pName, el));
+         } else {
+            // else set id to the property name and set an eventlistener to
+            // use the valueUp() method which sets the subproperty.
+            el.setAttribute('id', pName);
+            el.addEventListener('value-changed', ctx._valueUp('value.' + pName));
+            // Since we are editing a simple property, we check for
+            var inputEl = el.$.input;
+            inputEl.setAttribute('onfocusout', 'validate()');
+            if (this._isSchemaNumber(schema.type)) {
+               inputEl.type = 'number';
+
+               if (schema.multipleOf) {
+                  inputEl.step = schema.multipleOf;
+               }
+
+               if (!isNaN(schema.maximum)) {
+                  if (schema.exclusiveMaximum) {
+                     inputEl.max = schema.maximum - (schema.multipleOf || 1);
+                  } else {
+                     inputEl.max = schema.maximum;
+                  }
+               }
+
+               if (!isNaN(schema.minimum)) {
+                  if (schema.exclusiveMinimum) {
+                     inputEl.min = schema.minimum + (schema.multipleOf || 1);
+                  } else {
+                     inputEl.min = schema.minimum;
+                  }
+               }
+            }
+
+            if (this._isSchemaString(schema.type)) {
+               if (schema.format === 'date-time') {
+                  inputEl.type = 'datetime-local';
+                  inputEl.alwaysFloatLabel = true; // label doesn't float when value not set
+               } else if (schema.format === 'date') {
+                  inputEl.type = 'date';
+               } else if (schema.format === 'email') {
+                  inputEl.type = 'email';
+               } else if (schema.format === 'hostname') {
+                  inputEl.type = 'text';
+               } else if (schema.format === 'ipv4') {
+                  inputEl.type = 'text';
+               } else if (schema.format === 'ipv6') {
+                  inputEl.type = 'text';
+               } else if (schema.format === 'uri') {
+                  inputEl.type = 'url';
+               } else {
+                  inputEl.type = 'text';
+               }
+
+               if (schema.maxLength || schema.minLength) {
+                  inputEl.charCounter = true;
+               }
+
+               if (schema.maxLength) {
+                  inputEl.maxlength = schema.maxLength;
+               }
+
+               if (schema.minLength) {
+                  inputEl.minlength = schema.minLength;
+               }
+
+               if (schema.pattern) {
+                  inputEl.pattern = schema.pattern;
+               }
+            }
+
+            if (schema.component && schema.component.properties) {
+               Object.keys(schema.component.properties).forEach(function(prop) {
+                  inputEl[prop] = schema.component.properties[prop];
+               });
+            }
+
+            if (schema.title) {
+               inputEl.label = schema.title;
+            }
+         }
+         return el;
+      },
+      _deepClone: function(o) {
+         return JSON.parse(JSON.stringify(o));
+      },
+      /* Is the schema fragment representing an enumeration? */
+      _isSchemaEnum: function(schema) {
+         return !!schema.enum;
+      },
+      /* Is the schema fragment representing a simple value? */
+      _isSchemaValue: function(type) {
+         return this._isSchemaBoolean(type) || this._isSchemaNumber(type) || this._isSchemaString(type);
+      },
+      /* Is the schema fragment representing a boolean? */
+      _isSchemaBoolean: function(type) {
+         if (Array.isArray(type)) {
+            return type.indexOf('boolean') !== -1;
+         } else {
+            return type === 'boolean';
+         }
+      },
+      _isSchemaNumber: function(type) {
+         if (Array.isArray(type)) {
+            return type.indexOf('number') !== -1 || type.indexOf('integer') !== -1;
+         } else {
+            return type === 'number' || type === 'integer';
+         }
+      },
+      _isSchemaString: function(type) {
+         if (Array.isArray(type)) {
+            return type.indexOf('string') !== -1;
+         } else {
+            return type === 'string';
+         }
+      },
+      _isSchemaObject: function(type) {
+         return type === 'object';
+      },
+      _isSchemaArray: function(type) {
+         return type === 'array';
+      },
+      /**
+       * This is a fallback method.
+       */
+      _schemaPropertyChanged: function(event, detail) {
+         console.log('_schemaPropertyChanged(' + event + ',' + detail + ')');
+      },
+      /**
+       * Debug method only useful for output of strange elements
+       */
+      safeJSONString: function(obj, indent) {
+         var censor = function censor(censor) {
+            var i = 0;
+            var seenValues = [];
+            return function(key, value) {
+               if (seenValues.indexOf(value) >= 0) {
+                  return '[Circular]';
+               }
+               seenValues.push(value);
+               // if (i >= 29) // seems to be a harded maximum of 30 serialized objects?
+               //    return '[Unknown]';
+               ++i; // so we know we aren't using the original object anymore
+               return value;
+            }
+         };
+         return JSON.stringify(obj, censor(obj), indent);
+      }
+   };
+</script>

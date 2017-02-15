@@ -1,0 +1,438 @@
+<link rel="import" href="../polymer/polymer.html">
+<link rel="import" href="../paper-input/paper-input.html" />
+<link rel="import" href="../paper-icon-button/paper-icon-button.html" />
+<link rel="import" href="../iron-flex-layout/iron-flex-layout-classes.html">
+<link rel="import" href="../paper-input/paper-textarea.html">
+
+<link rel="import" href="./e2u-behaviors.html">
+
+<!--
+`e2u-json-array-editor`
+A simple array editor based on JSON schema.
+
+`e2u-json-array-editor` takes in a JSON schema of type array and builds a form,
+exposing a `value` property that represents an array described by the schema.
+
+JSON schema is defined here: http://json-schema.org/
+
+It is inspired by `eco-json-schema-array`, see
+http://ecoutu.github.io/eco-json-schema-form/components/eco-json-schema-form/.
+
+However, while trying to modify this to achieve editablility for a given value,
+I found it might be possible to simplify the component by reducing it to the
+basic needs and change the data binding:
+
+- because Polymer does not support Arrays with simple elements, holds a
+  property `objArray` which holds the actual data. In case of an array
+  defined as an Array of objects (which is the most common case) this holds
+  the same as this.value.
+- The creation of the children will be controlled by setting the value.
+- because Polymer does not support dynamic elements being handled by its own
+  dependency mechanism, we add the following methods:
+  - valueUp() - add this to an event handler in a subproperty, to update
+    subproperties of _self.value and trigger change events (upstream)
+  - objectUp() - add this to children that are e2u-json-object-editor or
+    e2u-json-array-editor elements to handle updating subproperties.
+  - downStreamSet() - this is called automatically when updating _self.value
+    as a whole. In this case, it updates all elements of this to show the
+    corresponding values.
+
+### Control flow for arrays
+
+- when the schema changes (on initialize) we set up objSchema and _schemaProperty
+  later used for element creation.
+- when the value is set (_valueChanged), we clear the form (removing all elements),
+  set objArray to [] without notification, and call _val2Obj which will add
+  all entries to the objArray, triggering generation of the GUI elements.
+- when a new entry is added, a push is done to the value array, triggering
+  the '_valueSplicesChanged(value.splices)' observer, which uses _val2Obj to
+  do the splicing on the objArray which triggers the GUI generation
+- when an entry is removed, the button holds an id pointing to a self-generated
+  id named $arrKey (we might probably use the Polymer key in the future). With
+  the index found, we do a splice on value which triggers a splice on objArray
+  which does the rest.
+- while entering data, all flow is controlled via the _objArrayChanged(objArray.*)
+  observer, updating the corresponding elements. 
+
+NOTE: The dependency mechanisms of Polymer do not support arrays of primitive
+values like Strings etc. Therefore, if an array is defined as such, it is
+transformed in an array of objects holding {:value, 'value'} objects and
+vice versa.
+
+@demo demo/index.html
+-->
+
+<dom-module id="e2u-json-array-editor">
+   <template>
+      <style is="custom-style" include="iron-flex iron-flex-alignment">
+      :host {
+        display: block;
+        @apply(--layout-vertical);
+      }
+      div.header {
+        font-size: 120%;
+     }
+    </style>
+
+    <!-- Add a button to add an item -->
+    <div class="horizontal center layout">
+      <div class="flex header" hidden$="[[!label]]">[[label]]</div>
+      <paper-icon-button icon="add" on-click="_onAddItem"></paper-icon-button>
+    </div>
+    <!-- this div will contain _self's children -->
+    <div id="array"></div>
+
+    </template>
+
+   <script>
+      Polymer({
+
+         is: 'e2u-json-array-editor',
+         behaviors: [E2uBehaviors.JSONSchema],
+
+         properties: {
+            name: {
+               type: String,
+               value: 'root',
+               notify: true
+            },
+            schema: {
+               type: Object,
+               observer: '_schemaChanged'
+            },
+            objSchema: {
+               type: Object
+            },
+            label: {
+               type: String
+            },
+            /* the array of values we are editing. Might be an array of simple values like strings */
+            value: {
+               type: Array,
+               notify: true,
+               value: function() {
+                  return [];
+               }
+            },
+            /* The array holding the value objects. If the values are simple values,
+            we will have an array of {value:'value'} objects here.
+            Also, a property named '$arrKey' will be added as soon as values get added
+            */
+            objArray: {
+               type: Array,
+               notify: true,
+               value: function() {
+                  return [];
+               }
+            },
+            isSimple: {
+               type: Boolean
+            },
+            /* the level of indentation, if any */
+            _level: {
+               type: Number,
+               value: 0
+            }
+         },
+         observers: [
+            '_valueChanged(value)',
+            '_valueSplicesChanged(value.splices)',
+            '_objArrayChanged(objArray.*)'
+         ],
+         /*
+          * When ready, log to console
+          */
+         ready: function() {
+            //console.log('e2u-json-array-editor initialized');
+         },
+         /*
+          * If we change the schema definition, we need to rebuild the form,
+          * leaving the value untouched.
+          */
+         _schemaChanged: function() {
+            // first clear existing form data
+            this._clearForm();
+            // extract the item property from the schema
+            if (this.schema.items) {
+               this.isSimple = (this.schema.items.type != 'object');
+               if (this.isSimple) {
+                  // if we have a simple array we must mimick an
+                  // object
+                  this.objSchema = {
+                     type: 'object',
+                     properties: {
+                        value: {
+                           //title: 'Wert',
+                           type: this.schema.items.type
+                        }
+                     }
+                  }
+               } else {
+                  this.objSchema = this.schema.items;
+               }
+               // now build the _schemaProperty used to make the elements
+               // note that before using it, we will set the property 'property'
+               // to the $arrKey later.
+               this._schemaProperty = {
+                  schema: this.objSchema,
+                  component: {
+                     'name': 'e2u-json-object-editor'
+                  }
+               }
+            } else {
+               console.error('JSON Schema array definition without items!');
+            }
+         },
+         /* The following methods are used internally */
+         _clearForm: function() {
+            var arrayEl = Polymer.dom(this.$.array);
+            while (arrayEl.firstChild) {
+               this._removeElement(arrayEl.firstChild);
+            }
+         },
+         _removeElement: function(el) {
+            el.schemaProperty = null;
+            Polymer.dom(this.$.array).removeChild(el);
+         },
+         /**
+          * Callback for changes to the basic value
+          */
+         _valueChanged: function(change) {
+            //console.log('value changed: ' + JSON.stringify(change));
+            // someone has set our value directly.
+            // if we are a simple array, we need to copy the whole array to objArray
+            this._clearForm();
+            this.objArray = [];
+            this.value = this.value || [];
+            if (this.value && this.value.length) {
+               this._val2Obj(0, this.value.length - 1);
+            }
+         },
+         _valueSplicesChanged: function(splices) {
+            //console.log('value splices changed: ' + JSON.stringify(splices));
+            // note that in some cases (e.g. setting the value directly to [])
+            // the splices may be undefined!
+            var ctx = this;
+            if (splices && splices.indexSplices) {
+               // check where a value has been added or removed.
+               // transfer this to objArray or delete there
+               splices.indexSplices.forEach(function(splice, idx) {
+                  if (splice.removed && splice.removed.length) {
+                     ctx.splice('objArray', splice.index, splice.removed.length);
+                  }
+                  if (splice.addedCount) {
+                     //console.log('Added ' + splice.addedCount + ' at pos ' + splice.index);
+                     ctx._val2Obj(splice.index, splice.index + splice.addedCount - 1);
+                  }
+               });
+            }
+         },
+         /**
+          * Handle changes in the objArray.
+          * Note that we defined this as listening to 'objValue.*' which means
+          * we receive a change structure:
+          * ```.path - path to changed element, interesting is 'objArray.splices' for add/removed
+          *         'objArray.#<idx>.<propertyname>' for changed properties on an element at <idx>
+          * .value - the splices
+          * .base - source of the change```
+          */
+         _objArrayChanged: function(change) {
+            //console.log('object Array changed: ' + JSON.stringify(change));
+            var ctx = this;
+            if (change.path == 'objArray.splices') {
+               // an element has been inserted or deleted.
+               // reflect this in
+               var splices = change.value;
+               if (splices && splices.indexSplices) {
+                  // check where a value has been added.
+                  // note that the value property has already been modified.
+                  splices.indexSplices.forEach(function(splice, idx) {
+                     if (splice.removed && splice.removed.length) {
+                        for (var i = splice.index, ii = splice.index + splice.removed.length; i < ii; i++) {
+                           //console.log('Removed array element ' + i);
+                           ctx._removeElement(ctx.$.array.children[i]);
+                           ctx.notifyPath('value');
+                        }
+                     }
+                     if (splice.addedCount) {
+                        //console.log('Added ' + splice.addedCount + ' at pos ' + splice.index);
+                        for (var i = splice.index, ii = splice.index + splice.addedCount; i < ii; i++) {
+                           // get the value added. This should be the same as objArray[i]
+                           var item = splice.object[i];
+                           // set the property value on ctx._schemaProperty to the $arrKey
+                           ctx._schemaProperty.property = item.$arrKey;
+                           // Create inner element for editing
+                           var componentEl = ctx._createElement(ctx._schemaProperty);
+                           componentEl.name = '#' + i;
+                           // make a container with the component element and a button to remove it
+                           var containerEl = ctx.create('div');
+                           var buttonEl = ctx.create('paper-icon-button', {
+                              icon: 'remove',
+                              id: item.$arrKey
+                           });
+                           ctx.listen(buttonEl, 'tap', '_onRemoveItem');
+                           componentEl.classList.add('flex');
+                           containerEl.classList.add('horizontal', 'layout');
+                           Polymer.dom(containerEl).appendChild(componentEl);
+                           Polymer.dom(containerEl).appendChild(buttonEl);
+                           var beforeEl = ctx.$.array.children[i];
+                           if (beforeEl) {
+                              Polymer.dom(ctx.$.array).insertBefore(containerEl, beforeEl);
+                           } else {
+                              Polymer.dom(ctx.$.array).appendChild(containerEl);
+                           }
+                           componentEl.value = item;
+                        }
+                     }
+                  });
+               }
+            } else if (change.path != 'objArray.length' && change.path != 'objArray') {
+               // A property has been changed in one of the objects.
+               // we need to map this to the value array, taking in account
+               // if we want a simple value or an object.
+               // note that array elements in the path may be adressed either by
+               // an index (e.g. value.0) or by key (e.g. value.#1) which may differ!
+               // Expecially, the index to key mapping may differ between the value
+               // and objArray property, so we need to get the index.
+               var path = change.path;
+               var val = change.value;
+               var idx;
+               if (path.indexOf('#') > -1) {
+                  // this is the normal (or only?) case here, path by array key
+                  // we must determine the array index.
+                  var key = path.replace(/.*(\#[0-9]*).*/g, '$1');
+                  idx = ctx.getArrayIndex(ctx.objArray, key);
+               } else {
+                  idx = path.replace(/.*([0-9]*).*/g, '$1');
+               }
+               // we need different handling here for simple and complex values.
+               if (this.isSimple) {
+                  // this.value holds an array of simple values
+                  if (typeof val === 'object') {
+                     // simple value wrapped in an object, use value
+                     val = val.value;
+                  }
+                  // the path using the index - possibly dependency checking
+                  // may not work due to Polymer limitations?
+                  path = 'value.' + idx;
+               } else {
+                  // this.value holds objects. We must decide if we have a property
+                  // set directly
+                  // cut off all characters after the number
+                  var prop = path.replace(/.*[0-9](.*)/g,'$1');
+                  if (prop) {
+                     path = 'value.' + idx + prop;
+                  } else {
+                     path = 'value.' + idx;
+                  }
+                  if (typeof val === 'object') {
+                     // we must clone the value and remove the $arrKey
+                     val = this._deepClone(val);
+                     // clean the array key when moving to value
+                     delete val.$arrKey;
+                  }
+               }
+               ctx.set(path, val);
+            }
+         },
+         /**
+          * called when the user clicks the '+' button.
+          * This method simply adds a new element to this.value, using the push() method.
+          * NOTE:
+          * If this.isSimple, we push an empty string, else an object.
+          */
+         _onAddItem(evt) {
+            if (this.isSimple) {
+               this.push('value', "");
+            } else {
+               this.push('value', {});
+            }
+         },
+         /**
+          * When the user clicks on the "remove" icon, the evt.target will be this
+          * icon.
+          * To access the ID of the element to be deleted, we need to access the
+          * owning paper-icon-button. Then, we get the index via _arrIndex and
+          * remove the corresponding element from value - resulting in a change in
+          * objArray and this triggers the removal of the corresponding element.
+          */
+         _onRemoveItem(evt) {
+            var ctx = this;
+            var key = Polymer.dom(evt.target.parentNode).node.id;
+            var idx = this._arrIndex({
+               $arrKey: key
+            });
+            if (idx != undefined && idx > -1) {
+               ctx.splice('value', idx, 1);
+               //console.log('Removed element with key: ' + key + ' id=' + idx);
+            }
+         },
+         /* lookup the item in this.objArray with the $arrKey set to the same
+         as in obj */
+         _arrIndex(obj) {
+            var a = this.objArray;
+            for (i = 0; i < a.length; i++) {
+               if (a[i].$arrKey == obj.$arrKey) {
+                  return i;
+               }
+            }
+         },
+         /**
+          * Return a function to be used as an event listener for sub-elements
+          * created dynamically, if they hold object or array values.
+          * @parameter varName is the path name of the variable to set (e.g. 'value.name')
+          * @parameter child is the child element using the generated function
+          *
+          * The function will get the value from the child object, and set the path on ctx
+          * (which is the parent object) to this value.
+          * Use this for upstream propagation of object or array data.
+          */
+         _objectUp: function(varName, child) {
+            var ctx = this;
+            var childCtx = child;
+            return function(evt) {
+               // childCtx.value should be an object.
+               var newVal = childCtx.value;
+               // childCtx will be an object whose properts has changed.
+               if (childCtx.valueChanged) {
+                  var idx = ctx._arrIndex(newVal);
+                  var path = 'objArray.' + idx;
+                  // set the new object value
+                  ctx.set(path, newVal);
+                  // note childCtx.valueChanged is something like '.name'
+                  ctx.notifyPath(path + childCtx.valueChanged);
+                  ctx.valueChanged = '.#' + idx + childCtx.valueChanged;
+                  childCtx.valueChanged = undefined;
+               }
+            }
+         },
+         /* get a new running key. Note that this is currently not fully supported,
+         however, we keep the approach for now. */
+         _getKey() {
+            this.lastid = this.lastid || 0;
+            this.lastid++;
+            return '#' + this.lastid;
+         },
+         /* copy the value entries from index=from to index=to to objValue.
+         This will generate the objects if this.isSimple, and add a $arrKey for each item */
+         _val2Obj(from, to) {
+            var ctx = this;
+            for (i = from; i <= to; i++) {
+               var obj;
+               if (ctx.isSimple) {
+                  obj = {
+                     value: ctx.value[i]
+                  };
+               } else {
+                  obj = this._deepClone(ctx.value[i] || {});
+               }
+               // add a key to the new object
+               obj.$arrKey = ctx._getKey();
+               //               console.log('obj: ' + JSON.stringify(obj));
+               ctx.splice('objArray', i, 1, obj);
+            }
+         }
+      });
+   </script>
+
+</dom-module>

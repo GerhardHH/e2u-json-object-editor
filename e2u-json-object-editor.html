@@ -1,0 +1,275 @@
+<link rel="import" href="../polymer/polymer.html">
+<link rel="import" href="../paper-input/paper-input.html" />
+<link rel="import" href="../iron-flex-layout/iron-flex-layout-classes.html">
+<link rel="import" href="../paper-input/paper-textarea.html">
+
+<link rel="import" href="./e2u-behaviors.html">
+
+<!--
+`e2u-json-object-editor`
+A simple object editor based on JSON schema.
+
+`e2u-json-object-editor` takes in a JSON schema of type object and builds a form,
+exposing a `value` property that represents an object described by the schema.
+JSON schema is defined here: http://json-schema.org/
+It is inspired by `eco-json-schema-object`, see
+http://ecoutu.github.io/eco-json-schema-form/components/eco-json-schema-form/.
+
+However, while trying to modify this to achieve editablility for a given value,
+I found it might be possible to simplify the component by reducing it to the
+basic needs and change the data binding:
+
+- Handle all primitive data types inside an object within this class (no own
+  elements for number, string etc.)
+- because Polymer does not support dynamic elements being handled by its own
+  dependency mechanism, we add the following methods:
+  - valueUp() - add this to an event handler in a subproperty, to update
+    subproperties of _self.value and trigger change events (upstream)
+  - objectUp() - add this to children that are e2u-json-object-editor or
+    e2u-json-array-editor elements to handle updating subproperties.
+  - downStreamSet() - this is called automatically when updating _self.value
+    as a whole. In this case, it updates all elements of this to show the
+    corresponding values.
+
+@demo demo/index.html
+-->
+
+<dom-module id="e2u-json-object-editor">
+   <template>
+   <style is="custom-style" include="iron-flex iron-flex-alignment">
+      :host {
+        display: block;
+        @apply(--layout-vertical);
+      }
+      div.header {
+        font-size: 120%;
+     }
+    </style>
+
+    <div class="header" hidden$="[[!label]]">[[label]]</div>
+    <!-- this div will contain _self's children -->
+    <div id="form"></div>
+
+    </template>
+
+   <script>
+      Polymer({
+         is: 'e2u-json-object-editor',
+         behaviors: [E2uBehaviors.JSONSchema],
+
+         properties: {
+            name: {
+               type: String,
+               value: 'root',
+               notify: true
+            },
+            schema: {
+               type: Object,
+               observer: '_schemaChanged'
+            },
+            label: {
+               type: String
+            },
+            value: {
+               type: Object,
+               notify: true
+               // oops! If we set a default value here, the initial loading will not
+               // use the value provided via value*'{{...}}'
+               // ,
+               // value: function() {
+               //    return {};
+               // }
+            },
+            /* an object holding dynamically created Polymer elements */
+            _propElements: {
+               type: Object
+            },
+            /* the level of indentation, if any */
+            _level: {
+               type: Number,
+               value: 0
+            }
+         },
+         observers: [
+            '_valueChanged(value.*)'
+         ],
+         /*
+          * When ready, make sure we have a name
+          */
+         ready: function() {
+            this.value = this.value || {};
+            //console.log('e2u-json-object-editor initialized');
+         },
+         /**
+          * Call this method to update the underlying object from
+          * outside in downstream direction.
+          * Note that the value is already set when this method is called.
+          */
+         downStreamSet: function() {
+            if (this._propElements) {
+               var ctx = this;
+               var elements = ctx._propElements;
+               for (var prop in elements) {
+                  if (elements.hasOwnProperty(prop)) {
+                     var info = elements[prop];
+                     // Get the valueProperty from the
+                     var schInfo = ctx._schemaProperties[info.index];
+                     var valProp = schInfo.component.valueProperty || 'value';
+                     if (schInfo.component.name == 'e2u-json-object-editor') {
+                        info.ele.set(valProp, ctx.value[prop] || {});
+                     } else if (schInfo.component.name == 'e2u-json-array-editor') {
+                        info.ele.set(valProp, ctx.value[prop] || []);
+                     } else {
+                        info.ele.set(valProp, ctx.value[prop] || "");
+                     }
+                  }
+               }
+            }
+         },
+         /*
+          * If we change the schema definition, we need to rebuild the form,
+          * leaving the value untouched.
+          * The value will be updated dynamically when data is entered.
+          */
+         _schemaChanged: function() {
+            // first clear existing form
+            this._clearForm();
+            // then build the new schema. Sets _schemaProperties.
+            this._buildSchemaProperties();
+            // build the form
+            this._buildForm();
+         },
+         /* The following methods are used internally */
+         _clearForm: function() {
+            var formEl = Polymer.dom(this.$.form);
+            while (formEl.firstChild) {
+               this._removeElement(formEl.firstChild);
+            }
+         },
+         _removeElement: function (el) {
+           el.schemaProperty = null;
+           Polymer.dom(this.$.form).removeChild(el);
+         },
+         /**
+          * Build an array `_schemaProperties` which holds the schema parts for
+          * each property defined in the schema. This is valid for schema fragments
+          * representing an object.
+          */
+         _buildSchemaProperties: function() {
+            var ctx = this;
+            this._schemaProperties = Object.keys(this.schema.properties || []).map(function(key) {
+               var schema = ctx.schema.properties[key];
+               var property = {
+                  property: key,
+                  label: schema.title || key,
+                  schema: schema,
+                  component: schema.component || {}
+               };
+               // set the value property if not defined in schema
+               if (!property.component.valueProperty) {
+                  property.component.valueProperty = 'value';
+               }
+
+               if (ctx._isSchemaEnum(schema)) {
+                  property.component.name = property.component.name || 'e2u-json-enum-editor';
+                  property.value = '';
+               } else if (ctx._isSchemaBoolean(schema.type)) {
+                  property.component.name = property.component.name || 'paper-checkbox';
+                  property.value = false;
+               } else if (ctx._isSchemaValue(schema.type)) {
+                  property.component.name = property.component.name || 'paper-input';
+                  property.value = '';
+               } else if (ctx._isSchemaObject(schema.type)) {
+                  property.component.name = property.component.name || 'e2u-json-object-editor';
+                  property.value = {};
+               } else if (ctx._isSchemaArray(schema.type)) {
+                  property.component.name = property.component.name || 'e2u-json-array-editor';
+                  property.value = [];
+               } else {
+                  return console.error('Unknown property type %s', schema.type);
+               }
+               return property;
+            });
+         },
+         /*
+          * Build the form from the poperties of the object schema.
+          **/
+         _buildForm: function() {
+            var ctx = this;
+            ctx._propElements = {};
+            this._schemaProperties.forEach(function(property, index) {
+               // make a new element for the component.
+               // Build an element for each property of the underlying object
+               var pName = property.property;
+               var el = ctx._createElement(property);
+               el.setAttribute('name', pName);
+               ctx._propElements[pName] = {
+                  ele: el,
+                  index: index
+               };
+               Polymer.dom(ctx.$.form).appendChild(el);
+            });
+         },
+         /**
+          * Callback for changes to the basic value
+          */
+         _valueChanged: function(change) {
+            //console.log(this.name + ' change: ' + JSON.stringify(change));
+            // set the entry values if they differ
+            if (change.path == 'value') {
+               //console.log(this.name + ' value set to ' + JSON.stringify(this.value));
+               // this happens if the value is changed externally, not from our
+               // children. This is because our children will always update a
+               // single poperts (e.g. value.name) and not the whole object.
+               this.downStreamSet();
+            }
+         },
+         /**
+          * Return a function to be used as an event listener for sub-elements
+          * created dynamically.
+          * @parameter varName is the path name of the variable to set (e.g. 'value.name')
+          *
+          * The function will get the value from the event, and set the path on ctx
+          * (which is the parent object) to this value.
+          * Use this for upstream propagation of simple values like string, number etc.
+          * held by simple input elements (paper-input etc).
+          */
+         _valueUp: function(varName) {
+            var ctx = this;
+            var subProp = varName.slice(varName.indexOf('.'));
+            return function(evt) {
+               var newVal = evt.detail.value;
+               if (ctx.get(varName) != newVal) {
+                  ctx.set(varName, newVal);
+                  // set a flag that the sup property has changed
+                  ctx.valueChanged = subProp;
+               }
+            }
+         },
+         /**
+          * Return a function to be used as an event listener for sub-elements
+          * created dynamically, if they hold object or array values.
+          * @parameter varName is the path name of the variable to set (e.g. 'value.name')
+          * @parameter child is the child element using the generated function
+          *
+          * The function will get the value from the child object, and set the path on ctx
+          * (which is the parent object) to this value.
+          * Use this for upstream propagation of object or array data.
+          */
+         _objectUp: function(varName, child) {
+            var ctx = this;
+            var childCtx = child;
+            return function(evt) {
+               var newVal = childCtx.value;
+               if (childCtx.valueChanged) {
+                  ctx.set(varName, newVal);
+                  ctx.notifyPath(varName + childCtx.valueChanged);
+                  childCtx.valueChanged = false;
+               }
+            }
+         }
+
+      });
+   </script>
+
+</dom-module>

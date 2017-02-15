@@ -2,6 +2,8 @@
 
 A simple object editor based on JSON schema by [GerhardHH](https://github.com/GerhardHH)
 
+Click here to see [Demo and API](https://gerhardhh.github.io/e2u-json-object-editor/components/e2u-json-object-editor) on GitHub
+
 `e2u-json-object-editor` takes in a JSON schema of type object and builds a form,
 exposing a `value` property that represents an object described by the schema.
 JSON schema is defined here: http://json-schema.org/
@@ -19,6 +21,8 @@ For more information, see the code and the demo which provides code comments.
 First, make sure you have the [Polymer CLI](https://www.npmjs.com/package/polymer-cli)
 and bower (https://bower.io/) installed.
 
+### When cloning from GitHub
+
 After git clone, perform the following steps:
 
 - run `bower install` to download dependent modules
@@ -26,6 +30,12 @@ After git clone, perform the following steps:
 
 See the displayed URL and open it in your browser. Alternatively, you may
 call `polymer serve --open`
+
+### When you want to use it via bower
+
+`bower install GerhardHH/e2u-json-object-editor`
+
+Then you can use the element in your project as usual.
 
 ## Usage
 You may incorporate the element into your page like:

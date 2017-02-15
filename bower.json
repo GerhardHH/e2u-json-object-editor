@@ -1,16 +1,14 @@
 {
     "name": "e2u-json-object-editor",
     "description": "A simple Polymer object editor based on JSON schema",
-    "main": [
-      "e2u-json-object-editor.html",
-      "e2u-json-array-editor.html",
-      "e2u-test-editor.html"
-      ],
-    "license": "MIT",
     "authors": [
         "Gerhard Höger-Hansen <info@friendlygis.com> (http://www.friendlygis.com)"
     ],
-    "keywords": ["Polymer","autoform","JSON Schema"],
+    "keywords": ["Polymer", "autoform", "JSON Schema"],
+    "main": [
+        "e2u-json-object-editor.html"
+    ],
+    "license": "MIT",
     "dependencies": {
         "polymer": "Polymer/polymer#^1.4.0",
         "iron-flex-layout": "^1.3.1",

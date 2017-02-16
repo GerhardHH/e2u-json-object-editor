@@ -1,3 +1,15 @@
+<!--
+HTML/Template file: e2u-json-array-editor.html
+purpose: Edit array based on JSON schema
+Copyright(C) 2017 friendlyGIS GmbH,
+Gerhard Höger-Hansen, Germany
+http://www.friendlygis.com
+info@friendlygis.com
+https://github.com/GerhardHH
+----
+Description:
+see below
+-->
 <link rel="import" href="../polymer/polymer.html">
 <link rel="import" href="../paper-input/paper-input.html" />
 <link rel="import" href="../paper-icon-button/paper-icon-button.html" />
@@ -52,7 +64,7 @@ basic needs and change the data binding:
   the index found, we do a splice on value which triggers a splice on objArray
   which does the rest.
 - while entering data, all flow is controlled via the _objArrayChanged(objArray.*)
-  observer, updating the corresponding elements. 
+  observer, updating the corresponding elements.
 
 NOTE: The dependency mechanisms of Polymer do not support arrays of primitive
 values like Strings etc. Therefore, if an array is defined as such, it is

@@ -1,3 +1,17 @@
+<!--
+HTML/Template file: e2u-test-editor.html
+purpose: Provide test environment for demo
+Copyright(C) 2017 friendlyGIS GmbH,
+Gerhard Höger-Hansen, Germany
+http://www.friendlygis.com
+info@friendlygis.com
+https://github.com/GerhardHH
+----
+Description:
+Simply provides schema and value data and uses the
+e2u-json-object-editor to show it. Provides a text display
+of the resulting object and buttons to update in both directions.
+-->
 <link rel="import" href="../polymer/polymer.html">
 
 <link rel="import" href="../iron-demo-helpers/demo-pages-shared-styles.html">
@@ -138,18 +152,13 @@ Test frame for the `e2u-json-object-editor`, simply providing the test data.
                notify: true,
                value: function() {
                   return {
-                     "birthday": "1962-12-31",
                      "company": "friendlyGIS GmbH",
                      "name": {
                         "firstName": "Gerhard",
                         "lastName": "Höger-Hansen"
                      },
                      "email": "info@friendlygis.com",
-                     "phoneNumbers": [{
-                        "type": "geschäftlich",
-                        "phoneNumber": "+49 5241 942458"
-                     }],
-                     "comment": "Hier kann man\nmehrzeilige Eingaben\nmachen!"
+                     "comment": "This text uses paper-textarea thus\nallowing us\nmultiline data!"
                   };
                }
             },
